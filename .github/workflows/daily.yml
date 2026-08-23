@@ -51,8 +51,6 @@ jobs:
             echo "Fetching for yesterday (default)"
             node scripts/fetch-daily.js
           fi
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Commit pending articles
         run: |

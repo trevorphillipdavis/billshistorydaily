@@ -18,24 +18,20 @@ npm run deploy
 ## How the daily automation works
 
 Every night at **2am ET**, GitHub Actions:
-1. Runs `scripts/fetch-daily.js` — calls Anthropic API with web search to fetch the previous day's Bills news
-2. Saves the result as `public/data/YYYY-MM-DD.json`
-3. Updates `public/data/index.json` (the list of all available dates)
-4. Commits the new files to the repo
-5. Rebuilds the React app and redeploys to GitHub Pages
+1. Runs `scripts/fetch-daily.js` — pulls the previous day's Bills news from configured RSS/JSON feeds
+2. Saves the result as `public/pending/YYYY-MM-DD.json` for editorial review
+3. Commits the pending file to the repo
+4. Rebuilds the React app and redeploys to GitHub Pages
+
+The daily fetch no longer requires an AI API key. The admin/editorial tools use the OpenAI proxy for headline, theme, writeup, and grouping generation.
 
 ## Setup checklist
 
-### 1. Add your Anthropic API key to GitHub Secrets
-- Repo → **Settings → Secrets and variables → Actions**
-- New secret: `ANTHROPIC_API_KEY` = `sk-ant-...`
+### 1. Add your OpenAI API key to Vercel
+- Add environment variable: `OPENAI_API_KEY`
+- Vercel will deploy `api/openai.js` automatically
 
-### 2. Set up the Vercel API proxy (keeps your key out of the browser)
-- Import this repo into [vercel.com](https://vercel.com)
-- Add environment variable: `ANTHROPIC_API_KEY` = `sk-ant-...`
-- Vercel will deploy `api/claude.js` automatically
-
-### 3. Custom domain
+### 2. Custom domain
 - In your domain registrar's DNS settings, add these A records pointing to GitHub Pages:
   - `185.199.108.153`
   - `185.199.109.153`
@@ -47,7 +43,7 @@ Every night at **2am ET**, GitHub Actions:
 ## Backfill a past date manually
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... node scripts/fetch-daily.js 2024-01-28
+node scripts/fetch-daily.js 2024-01-28
 ```
 
 ## Project structure
@@ -60,7 +56,7 @@ public/
     2026-06-07.json         ← daily data files (auto-generated each morning)
     ...
 api/
-  claude.js                 ← Vercel serverless proxy (hides API key)
+  openai.js                 ← Vercel serverless proxy for OpenAI generation
 scripts/
   fetch-daily.js            ← daily news fetch script
 src/
