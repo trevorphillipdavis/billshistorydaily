@@ -132,10 +132,10 @@ let state = {
   generating: false,
   status: null,
   preview: null,
-  apiKey:      localStorage.getItem('bhd_api_key') || '',
   githubToken: localStorage.getItem('bhd_github_token') || '',
 };
 const GITHUB_REPO = 'Trevor-Davis/billshistorydaily';
+const AI_PROXY_URL = 'https://billshistorydaily-apiproxy.vercel.app/api/openai';
 
 function setState(u) { Object.assign(state, u); render(); }
 
@@ -207,28 +207,27 @@ function clearAll() {
 
 // ── Preview generation ────────────────────────────────────────────────────────
 async function generatePreview(selected) {
-  if (!state.apiKey || selected.size === 0) return;
+  if (selected.size === 0) return;
   setState({ generating: true });
   const titles = [...selected].map(i => `- ${state.articles[i].title} (${state.articles[i].source})`).join('\n');
   try {
-    const res = await fetch('https://billshistorydaily-apiproxy.vercel.app/api/claude', {
+    const res = await fetch(AI_PROXY_URL, {
       method:'POST',
-      headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01'},
+      headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:200,
-        messages:[{role:'user',content:`Based on these Buffalo Bills articles:\n${titles}\n\nWrite a punchy 6-10 word newspaper headline. Respond with ONLY the headline, nothing else.`}]
+        max_output_tokens:200,
+        input:`Based on these Buffalo Bills articles:\n${titles}\n\nWrite a punchy 6-10 word newspaper headline. Respond with ONLY the headline, nothing else.`
       })
     });
     const data = await res.json();
-    const headline = data.content?.[0]?.text?.trim() || '';
+    const headline = (data.text || '').trim();
     setState({ generating:false, preview:{ headline }});
   } catch(e) { setState({ generating:false }); }
 }
 
 // ── Publish ───────────────────────────────────────────────────────────────────
 async function publish() {
-  const { apiKey, githubToken, headline, writeup, list, articles, images, selectedImage, date } = state;
-  if (!apiKey)       return setState({ status:{ type:'error', msg:'Enter your Anthropic API key.' }});
+  const { githubToken, headline, writeup, list, articles, images, selectedImage, date } = state;
   if (!githubToken)  return setState({ status:{ type:'error', msg:'Enter your GitHub Personal Access Token.' }});
   if (headline.size === 0) return setState({ status:{ type:'error', msg:'Select at least one article for the headline.' }});
   if (list.size === 0)     return setState({ status:{ type:'error', msg:'Select at least one article to include in the coverage list.' }});
@@ -243,12 +242,12 @@ async function publish() {
     const headlineTitles = headlineArticles.map(a => `- ${a.title} (${a.source})`).join('\n');
     const writeupTitles  = writeupArticles.map(a => `- ${a.title} (${a.source})`).join('\n');
 
-    const genRes = await fetch('https://billshistorydaily-apiproxy.vercel.app/api/claude', {
+    const genRes = await fetch(AI_PROXY_URL, {
       method:'POST',
-      headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01'},
+      headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:3000,
-        messages:[{role:'user',content:`You are writing content for Bills History Daily, a Buffalo Bills news archive.
+        max_output_tokens:3000,
+        input:`You are writing content for Bills History Daily, a Buffalo Bills news archive.
 
 FEATURED articles (use ONLY these for the headline and themes):
 ${headlineTitles}
@@ -260,19 +259,25 @@ Generate this JSON:
 {
   "headline": "punchy 6-10 word newspaper-style headline based on the FEATURED articles only",
   "themes": ["theme 1", "theme 2", "theme 3"],
-  "writeup": "3-5 sentence engaging sports journalism narrative covering ALL the writeup articles"
+  "writeup": "3-5 sentence engaging sports journalism narrative covering ALL the writeup articles",
+  "groups": [{ "topic": "Topic", "indices": [0] }]
 }
 
 Rules:
 - headline: 6-10 words max, no period, based only on featured articles
 - themes: exactly 3 short noun phrases (3-5 words each) from the featured articles
 - writeup: flowing narrative covering the full scope of the writeup articles
--,\n  \"groups\": [{ \"topic\": \"Topic\", \"indices\": [0] }] groups: group the coverage list articles into BROAD topic categories. Aim for 4-7 groups max — consolidate similar stories together (e.g. all uniform stories in one group, all Josh Allen stories together, all training camp stories together, all stadium stories together). Each group needs a short topic name (2-4 words) and an indices array (0-based positions in the list). Every article must appear in exactly one group.\n\nCOVERAGE LIST:\n${listArticles.map((a,i)=>`${i}: ${a.title}`).join("\\n")}\n\nAdd groups to the JSON like: \"groups\": [{ \"topic\": \"Josh Allen\", \"indices\": [0,2] }]\n- Respond ONLY with the JSON object.`}]
+- groups: group the coverage list articles into broad topic categories. Aim for 4-7 groups max. Each group needs a short topic name (2-4 words) and an indices array using 0-based positions from the coverage list. Every article must appear in exactly one group.
+
+COVERAGE LIST:
+${listArticles.map((a,i)=>`${i}: ${a.title}`).join("\n")}
+
+- Respond ONLY with the JSON object.`
       })
     });
 
     const genData = await genRes.json();
-    const genText = genData.content?.[0]?.text || '';
+    const genText = genData.text || '';
     const match = genText.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('Could not generate content. Please try again.');
     let generated;
@@ -299,7 +304,7 @@ Rules:
       topic: g.topic,
       articles: (g.indices||[]).map(i=>listArticles[i]).filter(Boolean).map(({title,source,url})=>({title,source,url}))
     })).filter(g=>g.articles.length>0);
-    // Fallback if Claude didn't return groups
+    // Fallback if the generator did not return groups
     const finalGroups = groupedArticles.length>0
       ? groupedArticles
       : [{ topic: 'Coverage', articles: listArticles.map(({title,source,url})=>({title,source,url})) }];
@@ -386,14 +391,12 @@ function checkIcon(color) {
 }
 
 function render() {
-  const { date, articles, images, selectedImage, headline, writeup, list, loading, publishing, generating, status, preview, apiKey, githubToken } = state;
+  const { date, articles, images, selectedImage, headline, writeup, list, loading, publishing, generating, status, preview, githubToken } = state;
   const canPublish = headline.size > 0 && list.size > 0 && !publishing;
 
   document.getElementById('app').innerHTML = `
     <div class="config-section">
       <div class="section-label">Configuration — saved in your browser</div>
-      <div class="token-label">Anthropic API Key</div>
-      <input class="token-input" type="password" id="apiKey" value="${apiKey}" placeholder="sk-ant-..." />
       <div class="token-label">GitHub Personal Access Token (repo scope)</div>
       <input class="token-input" type="password" id="githubToken" value="${githubToken}" placeholder="ghp_..." />
       <button class="save-btn" onclick="saveCredentials()">Save Credentials</button>
@@ -523,12 +526,10 @@ function render() {
 
   // Event listeners
   document.getElementById('dateInput')?.addEventListener('change', e => setState({ date: e.target.value }));
-  document.getElementById('apiKey')?.addEventListener('input', e => { state.apiKey = e.target.value; });
   document.getElementById('githubToken')?.addEventListener('input', e => { state.githubToken = e.target.value; });
 }
 
 function saveCredentials() {
-  localStorage.setItem('bhd_api_key', state.apiKey);
   localStorage.setItem('bhd_github_token', state.githubToken);
   setState({ status:{ type:'success', msg:'Credentials saved to browser.' }});
 }
